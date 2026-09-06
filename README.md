@@ -38,7 +38,10 @@ parameter plays the role of "where the race currently is." This is an explicit, 
 All tools take a FastF1-style `circuit` name (e.g. `"Monza"`, `"Silverstone"`, `"Bahrain"` - FastF1 does
 fuzzy matching on event names, so close spellings usually resolve, but a genuinely wrong circuit will
 eventually fail to find any session), a `season` (year), and a `session` code (`"FP1"`, `"FP2"`, `"FP3"`,
-`"Q"`, `"R"`) where applicable. Drivers use FastF1's 3-letter codes (`"LEC"`, `"VER"`, `"HAM"`, ...).
+`"Q"`, `"R"`) where applicable - common natural-language names are also accepted and normalized
+(`"Race"` -> `"R"`, `"Qualifying"`/`"Quali"` -> `"Q"`, `"Practice 1"` -> `"FP1"`, case-insensitive),
+since an LLM caller is more likely to guess those than the short code. Drivers use FastF1's 3-letter
+codes (`"LEC"`, `"VER"`, `"HAM"`, ...).
 
 | Tool | Purpose |
 |---|---|

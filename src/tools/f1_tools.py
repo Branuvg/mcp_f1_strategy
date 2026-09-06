@@ -46,11 +46,43 @@ def _safe(fn: _F) -> _F:
     return wrapper  # type: ignore[return-value]
 
 
-def _validate_session_code(session: str) -> None:
-    if session not in fastf1_client.VALID_SESSIONS:
-        raise ToolError(
-            f"Invalid session '{session}'. Must be one of {sorted(fastf1_client.VALID_SESSIONS)}."
-        )
+# An LLM caller is more likely to guess a natural-language session name than
+# FastF1's short codes, so common aliases are accepted and normalized before
+# validation — e.g. "Race" -> "R", "Qualifying" -> "Q", "Practice 1" -> "FP1".
+_SESSION_ALIASES = {
+    "RACE": "R",
+    "QUALIFYING": "Q",
+    "QUALIFICATION": "Q",
+    "QUALI": "Q",
+    "PRACTICE 1": "FP1",
+    "PRACTICE1": "FP1",
+    "FREE PRACTICE 1": "FP1",
+    "FREEPRACTICE1": "FP1",
+    "PRACTICE 2": "FP2",
+    "PRACTICE2": "FP2",
+    "FREE PRACTICE 2": "FP2",
+    "FREEPRACTICE2": "FP2",
+    "PRACTICE 3": "FP3",
+    "PRACTICE3": "FP3",
+    "FREE PRACTICE 3": "FP3",
+    "FREEPRACTICE3": "FP3",
+}
+
+
+def _normalize_session_code(session: str) -> str:
+    """Resolve `session` to one of FastF1's short codes, accepting common
+    natural-language aliases (case/whitespace-insensitive). Raises `ToolError`
+    naming the valid codes if `session` doesn't match a known code or alias.
+    """
+    canonical = session.strip().upper()
+    if canonical in fastf1_client.VALID_SESSIONS:
+        return canonical
+    if canonical in _SESSION_ALIASES:
+        return _SESSION_ALIASES[canonical]
+    raise ToolError(
+        f"Invalid session '{session}'. Must be one of {sorted(fastf1_client.VALID_SESSIONS)} "
+        f"(common names like 'Race' or 'Qualifying' are also accepted)."
+    )
 
 
 def _validate_compound(compound: str) -> str:
@@ -123,7 +155,7 @@ def register_tools(server: MCPServer, cache_dir: str) -> None:
         """Raw session snapshot at a given lap: position, gap to leader/car
         ahead, tire compound and tire age for every driver still classified.
         """
-        _validate_session_code(session)
+        session = _normalize_session_code(session)
         sess = fastf1_client.load_session(season, circuit, session)
         drivers = fastf1_client.get_race_state_rows(sess, lap)
         return {"lap": lap, "drivers": drivers}
@@ -175,7 +207,7 @@ def register_tools(server: MCPServer, cache_dir: str) -> None:
         """Optimal pit window for `driver`, weighing tire degradation against
         pit loss time, plus a traffic-risk read on the car right behind.
         """
-        _validate_session_code(session)
+        session = _normalize_session_code(session)
         sess = fastf1_client.load_session(season, circuit, session)
         state = fastf1_client.get_driver_state_at_lap(sess, driver, current_lap)
         total_laps = fastf1_client.get_total_laps(sess)
@@ -251,7 +283,7 @@ def register_tools(server: MCPServer, cache_dir: str) -> None:
         """Compares pitting `own_driver` before `rival_driver` (undercut)
         against staying out longer than them (overcut).
         """
-        _validate_session_code(session)
+        session = _normalize_session_code(session)
         sess = fastf1_client.load_session(season, circuit, session)
         own_state = fastf1_client.get_driver_state_at_lap(sess, own_driver, current_lap)
         rival_state = fastf1_client.get_driver_state_at_lap(sess, rival_driver, current_lap)
@@ -309,7 +341,7 @@ def register_tools(server: MCPServer, cache_dir: str) -> None:
         (each: a label, a list of pit laps, and a list of compounds — one
         more compound than pit laps) for the same driver.
         """
-        _validate_session_code(session)
+        session = _normalize_session_code(session)
         if not strategies:
             raise ToolError("`strategies` must contain at least one strategy to compare.")
 
@@ -369,7 +401,7 @@ def register_tools(server: MCPServer, cache_dir: str) -> None:
         """Projects `driver`'s finishing position and total time for a planned
         strategy, assuming rivals hold their recent pace with no further stops.
         """
-        _validate_session_code(session)
+        session = _normalize_session_code(session)
         sess = fastf1_client.load_session(season, circuit, session)
         state = fastf1_client.get_driver_state_at_lap(sess, driver, current_lap)
         total_laps = fastf1_client.get_total_laps(sess)
