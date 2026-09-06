@@ -2,12 +2,13 @@
 
 A local [Model Context Protocol](https://modelcontextprotocol.io/) server that gives an LLM-based race
 engineer chatbot real, calculated Formula 1 pit-stop strategy tools: tire degradation modeling, optimal
-pit windows, undercut/overcut simulation, and finish-position projection — all computed deterministically
+pit windows, undercut/overcut simulation, and finish-position projection - all computed deterministically
 from real session data, not guessed by the language model.
 
 Built for Project 1 ("Uso de un protocolo existente") of CC3067 Redes at Universidad del Valle de
-Guatemala. Consumed by [`host_mcp_redes`](../host_mcp_redes), a console MCP host/chatbot built for the
-same project.
+Guatemala. It's a standard local (stdio) MCP server, so it works with **any** MCP-compatible host —
+Claude Desktop, a custom console chatbot, or any other client that speaks the protocol — not just one
+specific host application.
 
 ## Overview
 
@@ -51,9 +52,123 @@ eventually fail to find any session), a `season` (year), and a `session` code (`
 | `predict_finish_position` | Projects finishing position/time for a planned strategy for the rest of the race. |
 | `generate_strategy_report` | Formats a Markdown report from a host/LLM-curated decision log (no summarization). |
 
-Full input/output JSON shapes for every tool are specified in
-[`mcp_f1_strategy_spec.md`](./mcp_f1_strategy_spec.md) (section 8) — that document is the authoritative
-protocol specification for this server, kept in the repo alongside the code.
+Full input/output JSON shapes for every tool are below.
+
+### Tool reference
+
+#### `get_race_state`
+Raw state of the session at a given lap: positions, gaps, compound and tire age for every driver.
+```
+input:  { circuit: str, season: int, session: "R"|"Q"|"FP1"|"FP2"|"FP3", lap: int }
+output: {
+  lap: int,
+  drivers: [
+    { driver: str, position: int, gap_to_leader_s: float, gap_to_ahead_s: float,
+      compound: str, tire_age_laps: int }
+  ]
+}
+```
+
+#### `get_tire_degradation_curve`
+Calibrated degradation model parameters for a compound + circuit.
+```
+input:  { compound: "SOFT"|"MEDIUM"|"HARD"|"INTERMEDIATE"|"WET", circuit: str, season?: int }
+output: {
+  compound: str, circuit: str,
+  base_pace_s: float,
+  degradation_rate_s_per_lap: float,
+  model_type: "linear"|"quadratic",
+  r_squared: float,
+  sample_size_laps: int,
+  data_source: "fastf1_real" | "insufficient_data_fallback",
+  warning?: str
+}
+```
+
+#### `get_pit_loss_time`
+```
+input:  { circuit: str, season?: int }
+output: { circuit: str, pit_loss_time_s: float, source: "fastf1_real"|"generic_fallback", warning?: str }
+```
+
+#### `get_pit_window`
+Optimal pit-stop window for a driver, with traffic risk at the pit exit.
+```
+input:  { driver: str, circuit: str, season: int, session: str, current_lap: int }
+output: {
+  driver: str, current_lap: int,
+  optimal_window: { start_lap: int, end_lap: int },
+  reasoning: str,
+  traffic_risk: "low"|"medium"|"high",
+  traffic_risk_reason: str,
+  warning?: str
+}
+```
+
+#### `simulate_undercut_overcut`
+Compares pitting before (undercut) or after (overcut) a named rival.
+```
+input:  { own_driver: str, rival_driver: str, circuit: str, season: int, session: str, current_lap: int }
+output: {
+  undercut: { pit_lap: int, projected_time_delta_s: float, net_position_gain: bool },
+  overcut:  { pit_lap: int, projected_time_delta_s: float, net_position_gain: bool },
+  recommendation: "undercut"|"overcut"|"stay_out"|"no_clear_advantage",
+  reasoning: str
+}
+```
+
+#### `compare_strategy_options`
+Generalizes undercut/overcut: compares N hypothetical strategies (pit laps + compounds) for one driver.
+```
+input:  {
+  driver: str, circuit: str, season: int, session: str, current_lap: int,
+  strategies: [ { label: str, pit_laps: [int], compounds: [str] } ]
+}
+output: {
+  results: [ { label: str, projected_total_time_s: float } ],
+  best_strategy: str
+}
+```
+
+#### `get_historical_strategies`
+```
+input:  { circuit: str, seasons?: [int], drivers?: [str] }
+output: {
+  circuit: str,
+  races: [
+    { season: int, driver: str,
+      stints: [ { compound: str, start_lap: int, end_lap: int } ],
+      finish_position: int }
+  ]
+}
+```
+
+#### `predict_finish_position`
+Projects finishing position/time for a planned strategy for the rest of the race.
+```
+input:  { driver: str, circuit: str, season: int, session: str, current_lap: int,
+          planned_strategy: { pit_laps: [int], compounds: [str] } }
+output: {
+  driver: str,
+  projected_finish_position: int,
+  projected_total_time_s: float,
+  confidence: "low"|"medium"|"high",
+  key_assumptions: [str]
+}
+```
+`key_assumptions` always declares the model's limitations explicitly (e.g. "assumes constant rival pace",
+"does not consider safety car/VSC", "does not consider changing weather").
+
+#### `generate_strategy_report`
+Formats a Markdown report from an already-curated decision log. Does not summarize or interpret — that's
+the LLM/host's job during the conversation; this tool only formats deterministically.
+```
+input:  {
+  race_context: { circuit: str, season: int },
+  decisions: [ { lap: int, tool_used: str, summary: str } ]
+}
+output: { markdown_report: str, filename_suggestion: str }
+```
 
 ### Error vs. warning policy
 
@@ -119,11 +234,12 @@ uv run python src/server.py
 It will sit there waiting for JSON-RPC messages on stdin (that's expected — this is how an MCP host talks
 to it). Press Ctrl+C to stop it.
 
-## Wiring into `host_mcp_redes`
+## Adding this server to an MCP host
 
-Add an entry to `host_mcp_redes/mcp_config.json` pointing at this repository (adjust the path to wherever
-you cloned it — the example below assumes it's a sibling directory of `host_mcp_redes`, as in this
-project's layout):
+This server uses the **stdio** transport, so any MCP host that can launch a local subprocess and speak
+MCP over its stdin/stdout can use it. Almost every MCP host (Claude Desktop, Cursor, and most custom
+chatbot hosts, including student-built ones for this course) reads its server list from a JSON config
+shaped like this — often called `mcpServers`:
 
 ```json
 {
@@ -132,27 +248,42 @@ project's layout):
       "command": "uv",
       "args": [
         "run",
-        "--project", "../mcp_f1_strategy",
-        "python", "../mcp_f1_strategy/src/server.py"
+        "--project", "/absolute/path/to/mcp_f1_strategy",
+        "python", "/absolute/path/to/mcp_f1_strategy/src/server.py"
       ]
     }
   }
 }
 ```
 
-No changes to `host_mcp_redes`'s Python code are needed — it discovers this server's 9 tools via MCP's
-`list_tools`, the same way it already does for the Filesystem and Git MCP servers.
+Replace `/absolute/path/to/mcp_f1_strategy` with wherever you cloned this repository (e.g.
+`C:\Users\you\projects\mcp_f1_strategy` on Windows, `/home/you/projects/mcp_f1_strategy` on Linux/macOS).
+Using an absolute path means the entry works regardless of the host's own working directory. `uv` handles
+creating the virtual environment and installing dependencies on first launch — no manual `uv sync` step is
+required by the host, though running it once yourself (see [Installation](#installation)) is a good sanity
+check.
+
+If your host doesn't use `uv`, the equivalent is just: activate this project's virtual environment, then
+run `python src/server.py` from inside `mcp_f1_strategy/` (or with `PYTHONPATH` pointed at its `src/`
+directory).
+
+**For Claude Desktop specifically**, this same JSON block goes under `mcpServers` in its config file
+(`claude_desktop_config.json` — on Windows, `%APPDATA%\Claude\claude_desktop_config.json`; on macOS,
+`~/Library/Application Support/Claude/claude_desktop_config.json`), then restart Claude Desktop.
+
+Once connected, the host discovers all 9 tools via MCP's `list_tools` — no code changes to the host are
+needed.
 
 ### Example scenario
 
-With the host running and this server wired in:
+With this server wired into your host of choice:
 
 ```
 You: I'm racing at Monza 2023, currently on lap 20 as LEC on 20-lap-old MEDIUM tires.
      What's my pit window, and would an undercut on VER make sense right now?
 ```
 
-Claude will call `get_pit_window` and `simulate_undercut_overcut` (chaining `get_race_state` /
+The LLM will call `get_pit_window` and `simulate_undercut_overcut` (chaining `get_race_state` /
 `get_tire_degradation_curve` / `get_pit_loss_time` as needed for context), then explain the recommendation
 — including surfacing any low-confidence warning honestly rather than hiding it.
 
@@ -186,7 +317,6 @@ mcp_f1_strategy/
 │       └── report_builder.py  # generate_strategy_report Markdown formatting
 ├── cache/                      # FastF1 local cache (gitignored)
 ├── tests/                      # pytest unit tests for models/ and reports/
-├── mcp_f1_strategy_spec.md     # full protocol specification (inputs/outputs per tool)
 ├── pyproject.toml
 └── README.md
 ```
@@ -195,6 +325,6 @@ mcp_f1_strategy/
 
 - No real live timing — FastF1 exposes completed sessions only (see [Scope note](#scope-note-this-is-not-live-timing)).
 - No custom database for historicals — `get_historical_strategies` reads directly through FastF1's own cache.
-- No special fallback for network/FastF1 failures — the host chatbot already requires internet for the LLM API, so this doesn't add a new failure mode.
+- No special fallback for network/FastF1 failures — any MCP host using this server already requires internet for its own LLM API calls, so this doesn't add a new failure mode.
 - `predict_finish_position` does not model safety cars, VSC, weather changes, or non-deterministic rival behavior — declared explicitly in its `key_assumptions` output.
 - No HTTP/SSE transport — this server is local/stdio only; a remote MCP server is a separate deliverable of this project.
