@@ -118,6 +118,29 @@ def _validate_compound(compound: str) -> str:
     )
 
 
+_REQUIRED_RACE_CONTEXT_FIELDS = ("circuit", "season")
+_REQUIRED_DECISION_FIELDS = ("lap", "tool_used", "summary")
+
+
+def _validate_race_context(race_context: dict[str, Any]) -> None:
+    missing = [field for field in _REQUIRED_RACE_CONTEXT_FIELDS if field not in race_context]
+    if missing:
+        raise ToolError(
+            f"race_context is missing required field(s): {missing}. "
+            f"Required: {list(_REQUIRED_RACE_CONTEXT_FIELDS)} (extra fields are fine and ignored)."
+        )
+
+
+def _validate_decisions(decisions: list[dict[str, Any]]) -> None:
+    for index, decision in enumerate(decisions):
+        missing = [field for field in _REQUIRED_DECISION_FIELDS if field not in decision]
+        if missing:
+            raise ToolError(
+                f"decisions[{index}] is missing required field(s): {missing}. "
+                f"Each decision needs: {list(_REQUIRED_DECISION_FIELDS)}."
+            )
+
+
 def _resolve_primary_season(circuit: str, season: int | None) -> int:
     """Resolve an omitted `season` to the most recent one that actually has a
     race session for this circuit in FastF1 (this year, then up to two years
@@ -504,10 +527,13 @@ def register_tools(server: MCPServer, cache_dir: str) -> None:
         }
 
     @server.tool()
+    @_safe
     def generate_strategy_report(
         race_context: dict[str, Any], decisions: list[dict[str, Any]]
     ) -> dict[str, Any]:
         """Formats a Markdown strategy report from an LLM/host-curated list of
         decisions. Purely deterministic formatting — no summarization here.
         """
+        _validate_race_context(race_context)
+        _validate_decisions(decisions)
         return report_builder.build_report(race_context, decisions)  # type: ignore[arg-type]
