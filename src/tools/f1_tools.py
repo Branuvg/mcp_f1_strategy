@@ -85,13 +85,37 @@ def _normalize_session_code(session: str) -> str:
     )
 
 
+# An LLM caller is more likely to say "Softs" or use the single-letter codes
+# shown on TV graphics than FastF1's full compound names.
+_COMPOUND_ALIASES = {
+    "S": "SOFT",
+    "SOFTS": "SOFT",
+    "M": "MEDIUM",
+    "MEDIUMS": "MEDIUM",
+    "H": "HARD",
+    "HARDS": "HARD",
+    "I": "INTERMEDIATE",
+    "INTER": "INTERMEDIATE",
+    "INTERS": "INTERMEDIATE",
+    "INTERMEDIATES": "INTERMEDIATE",
+    "W": "WET",
+    "WETS": "WET",
+    "FULL WET": "WET",
+    "FULLWET": "WET",
+    "FULL WETS": "WET",
+}
+
+
 def _validate_compound(compound: str) -> str:
-    compound = compound.upper()
-    if compound not in fastf1_client.VALID_COMPOUNDS:
-        raise ToolError(
-            f"Invalid compound '{compound}'. Must be one of {sorted(fastf1_client.VALID_COMPOUNDS)}."
-        )
-    return compound
+    canonical = compound.strip().upper()
+    if canonical in fastf1_client.VALID_COMPOUNDS:
+        return canonical
+    if canonical in _COMPOUND_ALIASES:
+        return _COMPOUND_ALIASES[canonical]
+    raise ToolError(
+        f"Invalid compound '{compound}'. Must be one of {sorted(fastf1_client.VALID_COMPOUNDS)} "
+        f"(single-letter codes like 'S'/'M'/'H' and plurals are also accepted)."
+    )
 
 
 def _resolve_primary_season(circuit: str, season: int | None) -> int:
@@ -209,6 +233,7 @@ def register_tools(server: MCPServer, cache_dir: str) -> None:
         """
         session = _normalize_session_code(session)
         sess = fastf1_client.load_session(season, circuit, session)
+        driver = fastf1_client.resolve_driver(sess, driver)
         state = fastf1_client.get_driver_state_at_lap(sess, driver, current_lap)
         total_laps = fastf1_client.get_total_laps(sess)
 
@@ -285,6 +310,8 @@ def register_tools(server: MCPServer, cache_dir: str) -> None:
         """
         session = _normalize_session_code(session)
         sess = fastf1_client.load_session(season, circuit, session)
+        own_driver = fastf1_client.resolve_driver(sess, own_driver)
+        rival_driver = fastf1_client.resolve_driver(sess, rival_driver)
         own_state = fastf1_client.get_driver_state_at_lap(sess, own_driver, current_lap)
         rival_state = fastf1_client.get_driver_state_at_lap(sess, rival_driver, current_lap)
 
@@ -346,6 +373,7 @@ def register_tools(server: MCPServer, cache_dir: str) -> None:
             raise ToolError("`strategies` must contain at least one strategy to compare.")
 
         sess = fastf1_client.load_session(season, circuit, session)
+        driver = fastf1_client.resolve_driver(sess, driver)
         state = fastf1_client.get_driver_state_at_lap(sess, driver, current_lap)
         total_laps = fastf1_client.get_total_laps(sess)
 
@@ -362,7 +390,7 @@ def register_tools(server: MCPServer, cache_dir: str) -> None:
                 current_lap,
                 total_laps,
                 strat["pit_laps"],
-                [c.upper() for c in strat["compounds"]],
+                [_validate_compound(c) for c in strat["compounds"]],
                 _get_pit_loss(circuit, season).pit_loss_time_s,
             )
             results.append(
@@ -381,7 +409,22 @@ def register_tools(server: MCPServer, cache_dir: str) -> None:
         from past race sessions at this circuit.
         """
         target_seasons = seasons or [date.today().year - offset for offset in range(1, 4)]
-        races = fastf1_client.get_historical_stints(circuit, target_seasons, drivers)
+
+        resolved_drivers = None
+        if drivers:
+            reference_session = None
+            for candidate_season in target_seasons:
+                reference_session = fastf1_client.try_load_session(candidate_season, circuit, "R")
+                if reference_session is not None:
+                    break
+            if reference_session is None:
+                raise ToolError(
+                    f"No FastF1 race session found for circuit '{circuit}' in seasons "
+                    f"{target_seasons} to resolve the requested driver names."
+                )
+            resolved_drivers = [fastf1_client.resolve_driver(reference_session, d) for d in drivers]
+
+        races = fastf1_client.get_historical_stints(circuit, target_seasons, resolved_drivers)
         if not races:
             raise ToolError(
                 f"No historical race data found for circuit '{circuit}' in seasons {target_seasons}."
@@ -403,6 +446,7 @@ def register_tools(server: MCPServer, cache_dir: str) -> None:
         """
         session = _normalize_session_code(session)
         sess = fastf1_client.load_session(season, circuit, session)
+        driver = fastf1_client.resolve_driver(sess, driver)
         state = fastf1_client.get_driver_state_at_lap(sess, driver, current_lap)
         total_laps = fastf1_client.get_total_laps(sess)
 
