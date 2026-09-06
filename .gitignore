@@ -147,6 +147,9 @@ activemq-data/
 # SageMath parsed files
 *.sage.py
 
+# FastF1 local cache (downloaded on demand, not project source)
+cache/
+
 # Environments
 .env
 .envrc
