@@ -40,8 +40,11 @@ fuzzy matching on event names, so close spellings usually resolve, but a genuine
 eventually fail to find any session), a `season` (year), and a `session` code (`"FP1"`, `"FP2"`, `"FP3"`,
 `"Q"`, `"R"`) where applicable - common natural-language names are also accepted and normalized
 (`"Race"` -> `"R"`, `"Qualifying"`/`"Quali"` -> `"Q"`, `"Practice 1"` -> `"FP1"`, case-insensitive),
-since an LLM caller is more likely to guess those than the short code. Drivers use FastF1's 3-letter
-codes (`"LEC"`, `"VER"`, `"HAM"`, ...).
+since an LLM caller is more likely to guess those than the short code. Tire `compound` similarly accepts
+single-letter TV-graphic codes and plurals (`"S"`/`"Softs"` -> `"SOFT"`, `"M"` -> `"MEDIUM"`, etc.).
+Drivers can be given as FastF1's 3-letter code (`"LEC"`), a car number (`"16"`), a last or full name
+(`"Leclerc"`, `"Charles Leclerc"`), or a close misspelling of one — resolved against that session's actual
+entry list, with a clear error listing the session's real drivers if nothing matches.
 
 | Tool | Purpose |
 |---|---|
