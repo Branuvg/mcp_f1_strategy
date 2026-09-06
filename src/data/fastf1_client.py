@@ -14,6 +14,7 @@ from typing import Any
 
 import fastf1
 import pandas as pd
+from rapidfuzz import fuzz, process
 
 VALID_SESSIONS = {"FP1", "FP2", "FP3", "Q", "R"}
 VALID_COMPOUNDS = {"SOFT", "MEDIUM", "HARD", "INTERMEDIATE", "WET"}
@@ -93,6 +94,59 @@ def _lap_time_seconds(value: Any) -> float | None:
     if pd.isna(value):
         return None
     return float(value.total_seconds())
+
+
+_NAME_MATCH_SCORE_CUTOFF = 75
+
+
+def resolve_driver(session: fastf1.core.Session, driver: str) -> str:
+    """Resolve a driver identifier to FastF1's 3-letter code for this session.
+
+    An LLM caller is more likely to be given a driver's name by the user than
+    their FastF1 code, so this accepts (case-insensitive): an exact code
+    ("LEC"), a car number ("16"), a last or full name ("Leclerc", "Charles
+    Leclerc"), or — as a last resort — a fuzzy match on full name to tolerate
+    minor typos, the same way FastF1 itself fuzzy-matches circuit names.
+    """
+    query = driver.strip()
+    canonical = query.upper()
+
+    results = session.results
+    if results is None or results.empty:
+        known_codes = sorted(session.laps["Driver"].dropna().unique().tolist())
+        if canonical in known_codes:
+            return canonical
+        raise DataNotAvailableError(
+            f"Driver '{driver}' not recognized in this session. Known driver codes: {known_codes}."
+        )
+
+    known_codes = set(results["Abbreviation"].dropna().unique())
+    if canonical in known_codes:
+        return canonical
+
+    by_number = results[results["DriverNumber"].astype(str) == query]
+    if not by_number.empty:
+        return str(by_number.iloc[0]["Abbreviation"])
+
+    lower_query = query.lower()
+    for _, row in results.iterrows():
+        if lower_query in {str(row["LastName"]).lower(), str(row["FullName"]).lower()}:
+            return str(row["Abbreviation"])
+
+    full_names_by_code = {
+        str(row["Abbreviation"]): str(row["FullName"]) for _, row in results.iterrows()
+    }
+    match = process.extractOne(
+        query, full_names_by_code.values(), scorer=fuzz.WRatio, score_cutoff=_NAME_MATCH_SCORE_CUTOFF
+    )
+    if match is not None:
+        matched_name = match[0]
+        return next(code for code, name in full_names_by_code.items() if name == matched_name)
+
+    raise DataNotAvailableError(
+        f"Driver '{driver}' not recognized in this session. "
+        f"Known drivers: {sorted(full_names_by_code.values())}."
+    )
 
 
 def get_driver_laps(session: fastf1.core.Session, driver: str) -> pd.DataFrame:
