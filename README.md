@@ -269,9 +269,45 @@ creating the virtual environment and installing dependencies on first launch - n
 required by the host, though running it once yourself (see [Installation](#installation)) is a good sanity
 check.
 
-If your host doesn't use `uv`, the equivalent is just: activate this project's virtual environment, then
-run `python src/server.py` from inside `mcp_f1_strategy/` (or with `PYTHONPATH` pointed at its `src/`
-directory).
+### Running without `uv`
+
+`uv` isn't part of the MCP protocol - it's just the tool this project uses to manage its virtual
+environment. A host that doesn't have `uv` installed can still run this server with a plain Python venv:
+
+```bash
+# Windows PowerShell
+cd mcp_f1_strategy
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install mcp fastf1 numpy
+
+# Linux / macOS
+cd mcp_f1_strategy
+python3 -m venv .venv
+source .venv/bin/activate
+pip install mcp fastf1 numpy
+```
+
+(`[tool.uv] package = false` in `pyproject.toml` means this project is never installed as a package
+itself - only its three dependencies need to be present, listed above; `uv sync` installs the exact same
+three packages under the hood.)
+
+Then point the host's `mcpServers` entry directly at that venv's Python interpreter instead of at `uv`:
+
+```json
+{
+  "mcpServers": {
+    "f1_strategy": {
+      "command": "/absolute/path/to/mcp_f1_strategy/.venv/Scripts/python.exe",
+      "args": ["/absolute/path/to/mcp_f1_strategy/src/server.py"]
+    }
+  }
+}
+```
+
+(use `.venv/bin/python` instead of `.venv\Scripts\python.exe` on Linux/macOS). No `uv` involvement at all
+from here on - the host just launches that interpreter directly, the same way it would launch any other
+local executable.
 
 **For Claude Desktop specifically**, this same JSON block goes under `mcpServers` in its config file
 (`claude_desktop_config.json` - on Windows, `%APPDATA%\Claude\claude_desktop_config.json`; on macOS,
