@@ -10,6 +10,11 @@ Guatemala. It's a standard local (stdio) MCP server, so it works with **any** MC
 Claude Desktop, a custom console chatbot, or any other client that speaks the protocol - not just one
 specific host application.
 
+**Protocol implementation:** this server speaks JSON-RPC 2.0 directly over stdio
+(`src/jsonrpc_mcp.py`) — newline-delimited JSON messages implementing `initialize`,
+`notifications/initialized`, `tools/list`, and `tools/call` by hand. It does **not** depend on the
+official `mcp` Python SDK (or any other MCP SDK); the only dependencies are `fastf1` and `numpy`.
+
 ## Overview
 
 Ask an LLM directly "should I pit now?" and it will guess, based on vague pattern-matching from its
@@ -225,8 +230,8 @@ cd mcp_f1_strategy
 uv sync
 ```
 
-`uv sync` installs the MCP Python SDK, `fastf1`, `numpy`, and the test dependencies declared in
-`pyproject.toml`.
+`uv sync` installs `fastf1`, `numpy`, and the test dependencies declared in `pyproject.toml`. No MCP
+SDK is installed — the protocol layer (`src/jsonrpc_mcp.py`) is hand-written JSON-RPC 2.0.
 
 ## Running standalone
 
@@ -279,18 +284,18 @@ environment. A host that doesn't have `uv` installed can still run this server w
 cd mcp_f1_strategy
 python -m venv .venv
 .venv\Scripts\Activate.ps1
-pip install mcp fastf1 numpy
+pip install fastf1 numpy
 
 # Linux / macOS
 cd mcp_f1_strategy
 python3 -m venv .venv
 source .venv/bin/activate
-pip install mcp fastf1 numpy
+pip install fastf1 numpy
 ```
 
 (`[tool.uv] package = false` in `pyproject.toml` means this project is never installed as a package
-itself - only its three dependencies need to be present, listed above; `uv sync` installs the exact same
-three packages under the hood.)
+itself - only its two dependencies need to be present, listed above (the MCP protocol layer is
+hand-written, not a dependency); `uv sync` installs the exact same two packages under the hood.)
 
 Then point the host's `mcpServers` entry directly at that venv's Python interpreter instead of at `uv`:
 
@@ -347,6 +352,7 @@ section above for what was observed).
 mcp_f1_strategy/
 ├── src/
 │   ├── server.py              # MCP entrypoint: registers the 9 tools, stdio transport
+│   ├── jsonrpc_mcp.py         # hand-rolled JSON-RPC 2.0 / MCP protocol layer (no SDK)
 │   ├── data/
 │   │   └── fastf1_client.py   # the only module that imports fastf1/pandas
 │   ├── models/

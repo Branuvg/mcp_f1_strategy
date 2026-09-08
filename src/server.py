@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from mcp.server.mcpserver import MCPServer
+from jsonrpc_mcp import MCPServer
 
 from tools.f1_tools import register_tools
 

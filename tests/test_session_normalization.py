@@ -1,5 +1,5 @@
 import pytest
-from mcp.server.mcpserver.exceptions import ToolError
+from jsonrpc_mcp import ToolError
 
 from tools.f1_tools import _normalize_session_code
 

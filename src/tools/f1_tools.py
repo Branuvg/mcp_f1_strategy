@@ -11,8 +11,7 @@ import functools
 from datetime import date
 from typing import Any, Callable, TypeVar
 
-from mcp.server.mcpserver import MCPServer
-from mcp.server.mcpserver.exceptions import ToolError
+from jsonrpc_mcp import MCPServer, ToolError
 
 from data import fastf1_client
 from models import strategy_sim
